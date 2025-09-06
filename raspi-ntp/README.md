@@ -17,6 +17,17 @@ sudo apt update
 sudo apt install -y chrony gpsd gpsd-clients pps-tools dnsmasq
 ```
 
+## Szybki start — checklist
+
+- Sprzęt: GPS USB (`/dev/ttyACM0`/`/dev/ttyUSB0`), opcjonalnie PPS -> GPIO18.
+- Klon repo: `git clone <repo>` i `cd offline_timeserver/raspi-ntp`.
+- Ustaw urządzenie w `gpsd.default` (domyślnie `/dev/ttyACM0`).
+- Uruchom: `sudo ./setup.sh` (konfiguruje gpsd i chrony przez SHM + PPS).
+- Jeśli PPS: sprawdź/dodaj `dtoverlay=pps-gpio,gpiopin=18` i zrestartuj.
+- Otwórz UDP/123 w firewallu na interfejsie LAN.
+- Weryfikuj: `chronyc sources -v`, `chronyc tracking`, `gpspipe -r | head`.
+- Klienci: ustawiają NTP na IP SBC; DHCP Option 42 (dnsmasq) rozgłasza adres.
+
 ## Konfiguracja krok po kroku
 
 1) Włącz PPS (opcjonalnie):

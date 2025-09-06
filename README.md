@@ -35,3 +35,39 @@ Szybki start na Raspberry Pi (Bookworm/Bullseye):
 5. Weryfikacja: `chronyc sources -v`, `chronyc tracking`, `gpsmon`/`gpspipe -r`.
 
 Klienci w sieci powinni wskazywać adres SBC jako serwer NTP (np. 192.168.x.x). Jeśli używasz DHCP, rozgłaszaj go przez Option 42 (przykład w `raspi-ntp/dnsmasq.conf.example`).
+
+## Checklist RPi (offline LAN)
+
+- Sprzęt: GPS USB (`/dev/ttyACM0` lub `/dev/ttyUSB0`); opcjonalnie PPS do GPIO18.
+- System: `sudo apt update && sudo apt install -y chrony gpsd gpsd-clients pps-tools`
+- Repo: `git clone <repo>` i przejdź do `raspi-ntp/`.
+- Urządzenie GPS: ustaw w `raspi-ntp/gpsd.default` właściwy port (domyślnie `/dev/ttyACM0`).
+- Setup: `sudo ./setup.sh` — podmienia configi, włącza usługi, dopisuje overlay PPS (jeśli włączony).
+- Reboot (jeśli PPS): `sudo reboot` (aktywuje `/dev/pps0`).
+- Firewall: otwarty `UDP/123` na interfejsie LAN (chrony).
+- Weryfikacja: `chronyc sources -v`, `chronyc tracking`, `gpspipe -r | head`.
+- Klienci: wskaż IP RPi jako serwer NTP lub rozgłoś przez DHCP Option 42 (dnsmasq przykład).
+- Zakresy sieci: w `chrony.conf` wpisy `allow` dopasowane do Twojej adresacji.
+
+## Podsumowanie (TL;DR)
+
+```
+# Na Raspberry Pi
+sudo apt update && sudo apt install -y chrony gpsd gpsd-clients pps-tools
+git clone git@github.com:lukaszroszczak/offline_timeserver.git
+cd offline_timeserver/raspi-ntp
+sudo ./setup.sh                 # ustawia gpsd + chrony (SHM z gpsd, opcjonalny PPS)
+sudo reboot                     # tylko jeśli używasz PPS (dtoverlay)
+
+# Sprawdzenie
+chronyc sources -v
+chronyc tracking
+gpspipe -r | head
+
+# Klienci
+# - Linux: chrony/ntpd -> <IP_RPi> lub `ntpdate -q <IP_RPi>`
+# - Windows: w32tm /config /manualpeerlist:<IP_RPi> /syncfromflags:manual /update && w32tm /resync
+# - DHCP: dnsmasq -> dhcp-option=option:ntp-server,<IP_RPi>
+```
+
+Uwaga: na Debian Bookworm plik overlay to `/boot/firmware/config.txt`, na starszych `/boot/config.txt`.
