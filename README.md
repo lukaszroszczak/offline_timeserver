@@ -46,6 +46,7 @@ Klienci w sieci powinni wskazywać adres SBC jako serwer NTP (np. 192.168.x.x). 
 - Reboot (jeśli PPS): `sudo reboot` (aktywuje `/dev/pps0`).
 - Firewall: otwarty `UDP/123` na interfejsie LAN (chrony).
 - Weryfikacja: `chronyc sources -v`, `chronyc tracking`, `gpspipe -r | head`.
+- Healthcheck: `sudo raspi-ntp/healthcheck.sh` (zbiera kluczowe statusy i podsumowuje OK/WARN/FAIL).
 - Klienci: wskaż IP RPi jako serwer NTP lub rozgłoś przez DHCP Option 42 (dnsmasq przykład).
 - Zakresy sieci: w `chrony.conf` wpisy `allow` dopasowane do Twojej adresacji.
 
