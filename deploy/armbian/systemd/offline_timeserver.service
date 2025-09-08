@@ -1,0 +1,18 @@
+[Unit]
+Description=Offline Time Server (HTTP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/offline_timeserver
+ExecStart=/usr/bin/python3 /opt/offline_timeserver/server.py
+Environment=HOST=0.0.0.0
+Environment=PORT=8000
+Restart=always
+RestartSec=2
+Nice=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
