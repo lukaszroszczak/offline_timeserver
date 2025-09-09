@@ -6,9 +6,12 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/offline_timeserver
+ExecStartPre=/-/usr/bin/mkdir -p /var/log/offline_timeserver
 ExecStart=/usr/bin/python3 /opt/offline_timeserver/server.py
 Environment=HOST=0.0.0.0
 Environment=PORT=8000
+Environment=LOG_DIR=/var/log/offline_timeserver
+Environment=LOG_LEVEL=INFO
 Restart=always
 RestartSec=2
 Nice=5
