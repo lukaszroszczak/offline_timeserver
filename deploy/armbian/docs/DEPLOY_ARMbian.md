@@ -12,6 +12,7 @@ install -d /opt
 git clone https://github.com/lukaszroszczak/offline_timeserver.git /opt/offline_timeserver
 install -m 0644 /opt/offline_timeserver/deploy/armbian/systemd/offline_timeserver.service /etc/systemd/system/
 systemctl daemon-reload
+# The unit pre-creates /var/log/offline_timeserver and sets LOG_DIR for rotating logs
 systemctl enable --now offline_timeserver
 ```
 
@@ -55,6 +56,24 @@ This sets nftables to:
 - Allow SSH 22/tcp, HTTP 8000/tcp
 - Allow NTP 123/udp only from `end0` subnets
 - Drop other inbound
+
+## Logging
+
+By default, logs go to journald and can be viewed with:
+
+```
+journalctl -u offline_timeserver -f
+```
+
+The app also supports optional rotating file logs controlled by envs:
+
+- LOG_LEVEL (INFO/DEBUG/WARNING/ERROR; default INFO)
+- LOG_DIR (directory for timeserver.log)
+- LOG_FILE (absolute path overrides LOG_DIR)
+- LOG_MAX_BYTES (default 1048576)
+- LOG_BACKUP_COUNT (default 5)
+
+The provided unit pre-creates /var/log/offline_timeserver and sets LOG_DIR.
 
 ## Healthcheck
 ```
