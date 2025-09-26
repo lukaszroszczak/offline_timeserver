@@ -1025,13 +1025,15 @@ class TimeHandler(BaseHTTPRequestHandler):
                                 ${ntp?.available ? 'Aktywny' : 'Niedostępny'}
                             </div>`;
                             
-                            // Network status
+                            // Network status - prioritize Ethernet connection
                             const network = currentData.network;
-                            const connected = network?.interfaces?.some(i => i.state === 'connected');
-                            const netClass = connected ? 'status-good' : 'status-warning';
+                            const ethernetConnected = network?.interfaces?.some(i => i.type === 'ethernet' && i.state === 'connected');
+                            const anyConnected = network?.interfaces?.some(i => i.state === 'connected');
+                            const netClass = ethernetConnected ? 'status-good' : (anyConnected ? 'status-warning' : 'status-error');
+                            const statusText = ethernetConnected ? 'Ethernet połączony' : (anyConnected ? 'Tylko WiFi/inne' : 'Brak połączenia');
                             html += `<div class="status-item ${netClass}">
-                                <strong>📡 Sieć</strong><br>
-                                ${connected ? 'Połączony' : 'Brak połączenia'}
+                                <strong>🔌 Sieć Ethernet</strong><br>
+                                ${statusText}
                             </div>`;
                             
                             container.innerHTML = html;
