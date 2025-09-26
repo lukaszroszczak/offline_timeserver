@@ -16,6 +16,29 @@ systemctl daemon-reload
 systemctl enable --now offline_timeserver
 ```
 
+To configure the admin panel credentials and cookie secret, create `/etc/default/offline_timeserver`:
+
+```
+cat >/etc/default/offline_timeserver <<'ENV'
+ADMIN_USER=admin
+ADMIN_PASS=change-me
+SECRET_KEY=generate-a-strong-random
+# LOG_LEVEL=INFO
+# LOG_DIR=/var/log/offline_timeserver
+ENV
+systemctl restart offline_timeserver
+```
+
+Remote one-liner deploy from your workstation:
+
+```
+# in repo root
+chmod +x deploy/armbian/scripts/deploy-remote.sh
+SSHPASS='<ssh_password>' SUDO_PASS='<sudo_password>' \
+  ADMIN_USER=admin ADMIN_PASS='change-me' SECRET_KEY='random-hex' \
+  deploy/armbian/scripts/deploy-remote.sh user@host
+```
+
 ## Configure gpsd
 Edit `/etc/default/gpsd`:
 ```
@@ -53,7 +76,7 @@ systemctl daemon-reload
 systemctl enable --now update-ntp-allow.service update-ntp-allow.timer
 ```
 This sets nftables to:
-- Allow SSH 22/tcp, HTTP 8000/tcp
+- Allow SSH 22/tcp, HTTP 80/tcp
 - Allow NTP 123/udp only from `end0` subnets
 - Drop other inbound
 

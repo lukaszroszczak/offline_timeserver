@@ -7,13 +7,25 @@ Zestaw narzędzi do lokalnego serwowania czasu w odłączonej sieci:
 
 Ważne: serwer czasu w sieci używa standardowo protokołu NTP na porcie UDP/123 (nie 53 — to port DNS). Jeśli chcesz, możemy dodać DNS/DHCP (dnsmasq) na 53, aby rozgłaszać adres serwera NTP klientom (DHCP option 42).
 
-## 1) Python HTTP demo
+## 1) Python HTTP demo + panel admin
 
 - Wymagania: Python 3.8+
-- Start: `python3 server.py` (domyślnie 0.0.0.0:8000)
+- Start: `python3 server.py` (domyślnie 0.0.0.0:80)
+- Weryfikacja: `curl -s http://localhost/time`
 - Endpointy:
-  - `GET /` — info
+  - `GET /` — info + panel (web panel na porcie 80)
   - `GET /time` — aktualny czas UTC w JSON
+  - `GET /login` — logowanie do panelu
+  - `GET /admin` — panel administracyjny (status GPS/NTP/sieć)
+  - `GET /api/status` — status w JSON (wymaga logowania)
+  - `POST /api/network` — prosta konfiguracja Wi‑Fi przez `nmcli` (wymaga logowania)
+
+- Uwierzytelnianie panelu:
+  - Zmiennie: `ADMIN_USER`, `ADMIN_PASS`, `SECRET_KEY` (do podpisu ciasteczek).
+  - Domyślnie (dev): `admin`/`admin`. Zmień w produkcji.
+  - Przykład: `ADMIN_USER=admin ADMIN_PASS='supersecret' SECRET_KEY='…' python3 server.py`
+
+Uwaga: port 80 wymaga uprawnień roota. Dewelopersko możesz użyć: `python3 server.py --host 0.0.0.0 --port 8000`.
 
 ## 2) Raspberry Pi jako serwer NTP z GPS
 

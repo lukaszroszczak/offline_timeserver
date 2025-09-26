@@ -23,7 +23,7 @@ table inet filter {
     ct state established,related accept
     iif lo accept
 
-    tcp dport { 22, 8000 } accept
+    tcp dport { 22, 80 } accept
 NFT
 
 if [ -n "$sub4" ]; then
