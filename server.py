@@ -98,13 +98,24 @@ def _b(s: str) -> bytes:
 def _run(cmd: str, timeout: int = 2) -> Tuple[int, str, str]:
     """Run a shell command safely (no shell=True), return (code, stdout, stderr)."""
     try:
-        proc = subprocess.run(
-            shlex.split(cmd),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        # If command contains pipes (like echo | sudo), use shell=True
+        if "|" in cmd or "&&" in cmd:
+            proc = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        else:
+            proc = subprocess.run(
+                shlex.split(cmd),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
     except Exception as e:
         return 127, "", str(e)
@@ -249,7 +260,7 @@ def get_ntp_status() -> Dict[str, Any]:
 
 
 def nmcli_available() -> bool:
-    return _run("nmcli -t -f GENERAL.STATE nm", timeout=2)[0] == 0
+    return _run("nmcli general status", timeout=2)[0] == 0
 
 
 def _guess_iface_type(name: str) -> str:
@@ -467,35 +478,42 @@ def scan_wifi_networks() -> List[Dict[str, Any]]:
 
 def get_ethernet_config() -> Dict[str, Any]:
     """Get current ethernet configuration."""
-    config = {"available": False, "interface": None, "method": "unknown", "ip": None, "gateway": None, "dns": []}
-    
+    config = {"available": False, "interface": None, "method": "unknown", "ip": None, "gateway": None, "dns": [], "connection": None}
+
     if not nmcli_available():
         return config
-    
-    # Find ethernet interface
-    code, out, _ = _run("nmcli -t -f DEVICE,TYPE,STATE connection show --active", timeout=3)
+
+    # Find ethernet connection name and device
+    code, out, _ = _run("nmcli -t -f NAME,TYPE,DEVICE connection show --active", timeout=3)
     if code == 0:
         for line in out.splitlines():
             parts = line.split(':')
-            if len(parts) >= 3 and parts[1] == "ethernet" and parts[2] == "activated":
-                config["interface"] = parts[0]
+            if len(parts) >= 3 and parts[1] == "802-3-ethernet":
+                config["connection"] = parts[0]
+                config["interface"] = parts[2]
                 config["available"] = True
                 break
-    
-    if not config["interface"]:
-        # Try to find any ethernet device
-        code, out, _ = _run("nmcli -t -f DEVICE,TYPE device status", timeout=3)
+
+    if not config["connection"]:
+        # Try to find any ethernet connection
+        code, out, _ = _run("nmcli -t -f NAME,TYPE connection show", timeout=3)
         if code == 0:
             for line in out.splitlines():
                 parts = line.split(':')
-                if len(parts) >= 2 and parts[1] == "ethernet":
-                    config["interface"] = parts[0]
+                if len(parts) >= 2 and parts[1] == "802-3-ethernet":
+                    config["connection"] = parts[0]
                     config["available"] = True
+                    # Get device name
+                    code2, out2, _ = _run(f"nmcli -t -f connection.interface-name connection show '{parts[0]}'", timeout=3)
+                    if code2 == 0:
+                        for line2 in out2.splitlines():
+                            if line2.startswith('connection.interface-name:'):
+                                config["interface"] = line2.split(':', 1)[1]
                     break
-    
-    if config["interface"]:
-        # Get detailed configuration
-        code, out, _ = _run(f"nmcli -t -f ipv4.method,ipv4.addresses,ipv4.gateway,ipv4.dns connection show {config['interface']}", timeout=3)
+
+    if config["connection"]:
+        # Get detailed configuration using connection name
+        code, out, _ = _run(f"nmcli -t -f ipv4.method,ipv4.addresses,ipv4.gateway,ipv4.dns connection show '{config['connection']}'", timeout=3)
         if code == 0:
             for line in out.splitlines():
                 if line.startswith('ipv4.method:'):
@@ -512,7 +530,18 @@ def get_ethernet_config() -> Dict[str, Any]:
                     dns = line.split(':', 1)[1]
                     if dns and dns != '--':
                         config["dns"] = dns.split(',')
-    
+
+        # Get current IP address if method is auto (DHCP) and no static IP is configured
+        if config["method"] == "auto" and not config["ip"] and config["interface"]:
+            code, out, _ = _run(f"nmcli -t -f IP4.ADDRESS device show {config['interface']}", timeout=3)
+            if code == 0:
+                for line in out.splitlines():
+                    if line.startswith('IP4.ADDRESS['):
+                        addr = line.split(':', 1)[1]
+                        if addr:
+                            config["ip"] = addr
+                            break
+
     return config
 
 
@@ -521,21 +550,21 @@ def configure_ethernet(method: str, ip: str = "", mask: str = "", gateway: str =
     if not nmcli_available():
         return False, "NetworkManager not available"
     
-    # Find ethernet interface
+    # Find ethernet connection
     eth_config = get_ethernet_config()
-    if not eth_config["available"] or not eth_config["interface"]:
-        return False, "No ethernet interface found"
-    
-    interface = eth_config["interface"]
+    if not eth_config["available"] or not eth_config["connection"]:
+        return False, "No ethernet connection found"
+
+    connection = eth_config["connection"]
     
     if method == "auto":
         # Configure DHCP
-        code, out, err = _run(f"nmcli connection modify {shlex.quote(interface)} ipv4.method auto", timeout=10)
+        code, out, err = _run(f"echo 'luckfox' | sudo -S nmcli connection modify {shlex.quote(connection)} ipv4.method auto", timeout=10)
         if code != 0:
             return False, f"Failed to set DHCP: {err}"
-        
+
         # Clear any static settings
-        _run(f"nmcli connection modify {shlex.quote(interface)} ipv4.addresses '' ipv4.gateway '' ipv4.dns ''", timeout=5)
+        _run(f"echo 'luckfox' | sudo -S nmcli connection modify {shlex.quote(connection)} ipv4.addresses '' ipv4.gateway '' ipv4.dns ''", timeout=5)
         
     elif method == "manual":
         if not ip or not mask:
@@ -552,20 +581,20 @@ def configure_ethernet(method: str, ip: str = "", mask: str = "", gateway: str =
         
         # Configure static IP
         ip_with_mask = f"{ip}/{mask}"
-        code, out, err = _run(f"nmcli connection modify {shlex.quote(interface)} ipv4.method manual ipv4.addresses {shlex.quote(ip_with_mask)}", timeout=10)
+        code, out, err = _run(f"echo 'luckfox' | sudo -S nmcli connection modify {shlex.quote(connection)} ipv4.method manual ipv4.addresses {shlex.quote(ip_with_mask)}", timeout=10)
         if code != 0:
             return False, f"Failed to set static IP: {err}"
-        
+
         # Set gateway if provided
         if gateway:
-            code, out, err = _run(f"nmcli connection modify {shlex.quote(interface)} ipv4.gateway {shlex.quote(gateway)}", timeout=5)
+            code, out, err = _run(f"echo 'luckfox' | sudo -S nmcli connection modify {shlex.quote(connection)} ipv4.gateway {shlex.quote(gateway)}", timeout=5)
             if code != 0:
                 return False, f"Failed to set gateway: {err}"
-        
+
         # Set DNS if provided
         if dns:
             dns_servers = dns.replace(' ', ',')  # Convert space-separated to comma-separated
-            code, out, err = _run(f"nmcli connection modify {shlex.quote(interface)} ipv4.dns {shlex.quote(dns_servers)}", timeout=5)
+            code, out, err = _run(f"echo 'luckfox' | sudo -S nmcli connection modify {shlex.quote(connection)} ipv4.dns {shlex.quote(dns_servers)}", timeout=5)
             if code != 0:
                 return False, f"Failed to set DNS: {err}"
         
@@ -573,7 +602,7 @@ def configure_ethernet(method: str, ip: str = "", mask: str = "", gateway: str =
         return False, "Invalid method. Use 'auto' or 'manual'"
     
     # Restart the connection
-    code, out, err = _run(f"nmcli connection down {shlex.quote(interface)} && nmcli connection up {shlex.quote(interface)}", timeout=15)
+    code, out, err = _run(f"echo 'luckfox' | sudo -S nmcli connection down {shlex.quote(connection)} && echo 'luckfox' | sudo -S nmcli connection up {shlex.quote(connection)}", timeout=15)
     if code != 0:
         return False, f"Failed to restart connection: {err}"
     
@@ -959,12 +988,26 @@ class TimeHandler(BaseHTTPRequestHandler):
 
                     <script>
                         let currentData = {};
-                        
+
                         function showTab(tabName) {
+                            // Check if we're leaving ethernet tab
+                            const ethernetTab = document.getElementById('ethernet');
+                            const wasEthernetActive = ethernetTab && ethernetTab.classList.contains('active');
+
                             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
                             event.target.classList.add('active');
                             document.getElementById(tabName).classList.add('active');
+
+                            // If we were on ethernet tab and now switching to another, update ethernet status
+                            if (wasEthernetActive && tabName !== 'ethernet') {
+                                updateEthernet();
+                            }
+
+                            // If we're entering ethernet tab, load fresh data
+                            if (tabName === 'ethernet') {
+                                updateEthernet();
+                            }
                         }
                         
                         function updateTime() {
@@ -990,7 +1033,14 @@ class TimeHandler(BaseHTTPRequestHandler):
                                 updateOverview();
                                 updateGPS();
                                 updateNetwork();
-                                updateEthernet();
+
+                                // Only update ethernet if user is NOT on ethernet tab
+                                const ethernetTab = document.getElementById('ethernet');
+                                const isEthernetActive = ethernetTab && ethernetTab.classList.contains('active');
+                                if (!isEthernetActive) {
+                                    updateEthernet();
+                                }
+
                                 updateSystemInfo();
                                 updateSSHStatus();
                             } catch (error) {
@@ -1025,14 +1075,31 @@ class TimeHandler(BaseHTTPRequestHandler):
                                 ${ntp?.available ? 'Aktywny' : 'Niedostępny'}
                             </div>`;
                             
-                            // Network status - prioritize Ethernet connection
+                            // Network status - show green when any connection is working
                             const network = currentData.network;
                             const ethernetConnected = network?.interfaces?.some(i => i.type === 'ethernet' && i.state === 'connected');
+                            const wifiConnected = network?.interfaces?.some(i => i.type === 'wifi' && i.state === 'connected');
                             const anyConnected = network?.interfaces?.some(i => i.state === 'connected');
-                            const netClass = ethernetConnected ? 'status-good' : (anyConnected ? 'status-warning' : 'status-error');
-                            const statusText = ethernetConnected ? 'Ethernet połączony' : (anyConnected ? 'Tylko WiFi/inne' : 'Brak połączenia');
+                            const netClass = anyConnected ? 'status-good' : 'status-error';
+
+                            let statusText = 'Brak połączenia';
+                            let interfaceIcon = '📡';
+                            if (ethernetConnected && wifiConnected) {
+                                statusText = 'Ethernet i WiFi połączone';
+                                interfaceIcon = '🔌📡';
+                            } else if (ethernetConnected) {
+                                statusText = 'Ethernet połączony';
+                                interfaceIcon = '🔌';
+                            } else if (wifiConnected) {
+                                statusText = 'WiFi połączone';
+                                interfaceIcon = '📡';
+                            } else if (anyConnected) {
+                                statusText = 'Sieć połączona';
+                                interfaceIcon = '📡';
+                            }
+
                             html += `<div class="status-item ${netClass}">
-                                <strong>🔌 Sieć Ethernet</strong><br>
+                                <strong>${interfaceIcon} Interfejs Sieciowy</strong><br>
                                 ${statusText}
                             </div>`;
                             
@@ -1112,7 +1179,7 @@ class TimeHandler(BaseHTTPRequestHandler):
                                 const response = await fetch('/api/ethernet/status');
                                 const data = await response.json();
                                 const container = document.getElementById('ethernet-status');
-                                
+
                                 if (data.available) {
                                     const statusClass = data.method === 'auto' ? 'status-good' : 'status-warning';
                                     let html = `<div class="status-grid">`;
@@ -1120,35 +1187,46 @@ class TimeHandler(BaseHTTPRequestHandler):
                                         <strong>Interfejs:</strong> ${data.interface}<br>
                                         <strong>Metoda:</strong> ${data.method === 'auto' ? 'DHCP' : 'Statyczny IP'}
                                     </div>`;
-                                    
+
                                     if (data.ip) {
                                         html += `<div class="status-item status-good">
                                             <strong>IP:</strong> ${data.ip}<br>
                                             <strong>Brama:</strong> ${data.gateway || 'N/A'}
                                         </div>`;
                                     }
-                                    
+
                                     if (data.dns && data.dns.length > 0) {
                                         html += `<div class="status-item status-good">
                                             <strong>DNS:</strong><br>${data.dns.join(', ')}
                                         </div>`;
                                     }
-                                    
+
                                     html += '</div>';
                                     container.innerHTML = html;
-                                    
-                                    // Update form fields
-                                    document.getElementById('eth-method').value = data.method;
-                                    toggleEthernetFields();
-                                    
+
+                                    // Update form fields - but preserve what user is currently editing
+                                    const ethMethodSelect = document.getElementById('eth-method');
+                                    const currentFocus = document.activeElement;
+
+                                    // Only update dropdown if it's not currently open/focused
+                                    if (currentFocus !== ethMethodSelect) {
+                                        ethMethodSelect.value = data.method;
+                                        toggleEthernetFields();
+                                    }
+
+                                    // Only update other fields if they're not focused
                                     if (data.method === 'manual') {
                                         const ipParts = (data.ip || '').split('/');
                                         if (ipParts.length === 2) {
-                                            document.getElementById('eth-ip').value = ipParts[0];
-                                            document.getElementById('eth-mask').value = ipParts[1];
+                                            const ethIp = document.getElementById('eth-ip');
+                                            const ethMask = document.getElementById('eth-mask');
+                                            if (currentFocus !== ethIp) ethIp.value = ipParts[0];
+                                            if (currentFocus !== ethMask) ethMask.value = ipParts[1];
                                         }
-                                        document.getElementById('eth-gateway').value = data.gateway || '';
-                                        document.getElementById('eth-dns').value = (data.dns || []).join(' ');
+                                        const ethGateway = document.getElementById('eth-gateway');
+                                        const ethDns = document.getElementById('eth-dns');
+                                        if (currentFocus !== ethGateway) ethGateway.value = data.gateway || '';
+                                        if (currentFocus !== ethDns) ethDns.value = (data.dns || []).join(' ');
                                     }
                                 } else {
                                     container.innerHTML = '<div class="status-item status-error">Ethernet niedostępny</div>';
@@ -1163,6 +1241,7 @@ class TimeHandler(BaseHTTPRequestHandler):
                             const manualFields = document.getElementById('manual-fields');
                             manualFields.style.display = method === 'manual' ? 'block' : 'none';
                         }
+
                         
                         async function configureEthernet(event) {
                             event.preventDefault();
